@@ -100,6 +100,14 @@ export const CartFragment = `
             adjustmentSource
             type
         }
+        payments {
+            method
+            amount
+            state
+            transactionId
+            errorMessage
+            metadata
+        }
     }
 `;
 
