@@ -143,6 +143,7 @@ export default {
         const walletConnected = ref(false);
         const walletProcessing = ref(false);
         const walletIcon = ref(false);
+        const walletPubkey = ref(false);
 
         onSSR(async () => {
             await load();
@@ -173,6 +174,7 @@ export default {
                     };
                     walletIcon.value = walletAdapter.icon;
                     walletConnected.value = true;
+                    walletPubkey.value = publicKey.toBase58();
                     eventbus.emit('WalletConnected', true);
                 });
                 walletAdapter.on('disconnect', function () {
@@ -194,45 +196,69 @@ export default {
         });
 
         const processOrder = async () => {
-            const response = await set({
+            console.log('Process order');
+            //console.log(cart);
+            var amount = cart.value.totalWithTax / 100;
+            var urlPayment = 'https://atx2.atellix.net/api/payment_gateway/v1/order';
+            var resPayment = await axios.post(urlPayment, {
+                'order_id': cart.value.code,
+                'price_total': amount.toFixed(2),
+            }, {
+                auth: { username: 'api', password: '685f46052d084a8cbe8c642365c188be27c2a134919f4879886b9d7f8b04e05b' }
+            });
+            if (resPayment.status === 200 && resPayment.data.result === 'ok') {
+                var paydata = resPayment.data;
+                var urlCheckout = 'https://atx2.atellix.net/api/checkout';
+                var resCheckout = await axios.post(urlCheckout, {
+                    'command': 'load',
+                    'mode': 'order',
+                    'uuid': paydata['order_uuid'],
+                });
+                if (resCheckout.status === 200 && resCheckout.data.result === 'ok') {
+                    var data = resCheckout.data;
+                    $solana.updateNetData(data['net_data']);
+                    $solana.updateSwapData(data['swap_data']);
+                    $solana.updateOrderData(data['order_data']);
+                    $solana.updateRegister(async (sig) => {
+                        console.log('Register Signature: ' + sig);
+                        var resRegister = await axios.post(urlCheckout, {
+                            'command': 'register_signature',
+                            'op': 'checkout',
+                            'sig': sig,
+                            'uuid': paydata['order_uuid'],
+                            'timezone': Intl.DateTimeFormat().resolvedOptions().timeZone,
+                            'user_key': walletPubkey.value,
+                        });
+                        if (resRegister.status === 200 && resRegister.data.result === 'ok') {
+                            return true;
+                        }
+                        return false;
+                    });
+                    var amountTotal = cart.value.totalWithTax * 100;
+                    var tokensTotal = amountTotal.toFixed(0);
+                    var orderParams = {
+                        'tokensTotal': tokensTotal,
+                        'swap': true,
+                        'swapKey': 'USDV-USDC',
+                    };
+                    var txres = await $solana.merchantCheckout(orderParams);
+                    console.log('Transaction Result');
+                    console.log(txres);
+                }
+            }
+            
+            /*const response = await set({
                 method: paymentMethod?.value?.code,
                 metadata: {
-                    // Here you would pass data from an external Payment Provided after successful payment process like payment id.
                 }
             });
-            if (paymentMethod && paymentMethod.value && paymentMethod.value.code === 'atellixpay') {
+            if (paymentMethod.value.code === 'atellixpay') {
                 if (response.payments && response.payments[0].transactionId) {
-                    var url = 'https://atx2.atellix.net/api/checkout';
-                    var res = await axios.post(url, {
-                        'command': 'load',
-                        'mode': 'order',
-                        'uuid': response.payments[0].transactionId,
-                    });
-                    //console.log(res);
-                    if (res.status === 200) {
-                        $solana.updateNetData(res.data['net_data']);
-                        $solana.updateSwapData(res.data['swap_data']);
-                        $solana.updateOrderData(res.data['order_data']);
-                        $solana.updateRegister(async (sig) => {
-                            console.log('Register Signature: ' + sig);
-                            return true;
-                        });
-                        var amountTotal = response.payments[0].amount * 100;
-                        var tokensTotal = amountTotal.toFixed(0);
-                        var orderParams = {
-                            'tokensTotal': tokensTotal,
-                            'swap': true,
-                            'swapKey': 'USDV-USDC',
-                        };
-                        var txres = await $solana.merchantCheckout(orderParams);
-                        console.log('Transaction Result');
-                        console.log(txres);
-                    }
-                    /*console.log(JSON.stringify(response.payments[0]));
+                    console.log(JSON.stringify(response.payments[0]));
                     let returnUrl = window.location.protocol + '//' + window.location.host + '/checkout/thank-you?order=' + response.code;
-                    window.location = response.payments[0].metadata.public.checkoutUrl + '&return_url=' + encodeURIComponent(returnUrl);*/
+                    window.location = response.payments[0].metadata.public.checkoutUrl + '&return_url=' + encodeURIComponent(returnUrl);
                 } 
-            }
+            }*/
 
             /*const thankYouPath = { name: 'thank-you', query: { order: response?.code }};
             context.root.$router.push(context.root.localePath(thankYouPath));
