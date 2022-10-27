@@ -61,7 +61,7 @@ export default {
     project-only-end */
     ['@vue-storefront/vendure/nuxt', {
       i18n: { useNuxtI18nConfig: true }
-    }]
+    }],
   ],
   modules: [
     ['nuxt-i18n', {
@@ -69,7 +69,8 @@ export default {
     }],
     'cookie-universal-nuxt',
     'vue-scrollto/nuxt',
-    '@vue-storefront/middleware/nuxt'
+    '@vue-storefront/middleware/nuxt',
+    '@nuxtjs/axios'
   ],
   i18n: {
     currency: 'USD',
@@ -112,6 +113,11 @@ export default {
         }*/
       }
     }
+  },
+  axios: {
+    baseURL: 'https://atx2.atellix.net/api/',
+    timeout: 300000, // 30 seconds
+    headers: { 'Content-Type': 'application/json' }
   },
   styleResources: {
     scss: [

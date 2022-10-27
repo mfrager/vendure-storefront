@@ -63,7 +63,7 @@
                     class="sf-property--full-width sf-property--large summary__property-total"
                 />
 
-                <VsfPaymentProvider @paymentMethodSelected="updatePaymentMethod"/>
+                <VsfPaymentProvider @paymentMethodSelected="updatePaymentMethod" :walletConnected="walletConnected" :walletIcon="walletIcon" :walletProcessing="walletProcessing"/>
 
                 <SfCheckbox v-e2e="'terms'" v-model="terms" name="terms" class="summary__terms">
                     <template #label>
@@ -114,6 +114,7 @@ import { ref, computed, onMounted } from '@vue/composition-api';
 import { useMakeOrder, useCart, cartGetters, usePayment } from '@vue-storefront/vendure';
 import $solana from '@/atellix/solana-client';
 import Emitter from 'tiny-emitter';
+import axios from 'axios';
 
 export default {
     name: 'ReviewOrder',
@@ -139,6 +140,9 @@ export default {
         const terms = ref(false);
         const paymentMethod = ref(null);
         const eventbus = new Emitter();
+        const walletConnected = ref(false);
+        const walletProcessing = ref(false);
+        const walletIcon = ref(false);
 
         onSSR(async () => {
             await load();
@@ -152,33 +156,40 @@ export default {
             $solana.init();
             var wallets = $solana.getWallets();
             console.log('Wallets', wallets);
-            var wallet_adapter;
-            var wallet_await = new Promise((resolve) => {
+            var walletAdapter;
+            var walletAwait = new Promise((resolve) => {
                 eventbus.on('WalletConnected', function (val) {
                     resolve(val);
                 });
             });
             if (wallets.length > 0) {
-                wallet_adapter = wallets[0];
-                wallet_adapter.on('connect', function (publicKey) {
+                walletAdapter = wallets[0];
+                walletAdapter.on('connect', function (publicKey) {
                     console.log('Connected to ' + publicKey.toBase58());
-                    eventbus.emit('WalletConnected', {
-                        'connected': true,
-                        'icon': wallet_adapter.icon,
+                    var walletStatus = {
+                        'connnected': true,
+                        'icon': walletAdapter.icon,
                         'pubkey': publicKey.toBase58(),
-                    });
+                    };
+                    walletIcon.value = walletAdapter.icon;
+                    walletConnected.value = true;
+                    eventbus.emit('WalletConnected', true);
                 });
-                wallet_adapter.on('disconnect', function () {
+                walletAdapter.on('disconnect', function () {
                     console.log('Disconnected');
-                    eventbus.emit('WalletConnected', {'connected': false});
+                    var walletStatus = {
+                        'connnected': false,
+                    };
+                    walletConnected.value = false;
+                    eventbus.emit('WalletConnected', false);
                 });
-                await wallet_adapter.connect();
-                await wallet_adapter.connect(); // Need to call twice on iOS?
+                await walletAdapter.connect();
+                await walletAdapter.connect(); // Need to call twice on iOS?
             }
-            var ready = await wallet_await;
+            var ready = await walletAwait;
             if (ready) {
                 console.log('Solana ready!');
-                //thiz.provider = $solana.getProvider(thiz.wallet_adapter);
+                $solana.getProvider(walletAdapter);
             }
         });
 
@@ -191,9 +202,35 @@ export default {
             });
             if (paymentMethod && paymentMethod.value && paymentMethod.value.code === 'atellixpay') {
                 if (response.payments && response.payments[0].transactionId) {
-                    //console.log(JSON.stringify(response.payments[0]));
+                    var url = 'https://atx2.atellix.net/api/checkout';
+                    var res = await axios.post(url, {
+                        'command': 'load',
+                        'mode': 'order',
+                        'uuid': response.payments[0].transactionId,
+                    });
+                    //console.log(res);
+                    if (res.status === 200) {
+                        $solana.updateNetData(res.data['net_data']);
+                        $solana.updateSwapData(res.data['swap_data']);
+                        $solana.updateOrderData(res.data['order_data']);
+                        $solana.updateRegister(async (sig) => {
+                            console.log('Register Signature: ' + sig);
+                            return true;
+                        });
+                        var amountTotal = response.payments[0].amount * 100;
+                        var tokensTotal = amountTotal.toFixed(0);
+                        var orderParams = {
+                            'tokensTotal': tokensTotal,
+                            'swap': true,
+                            'swapKey': 'USDV-USDC',
+                        };
+                        var txres = await $solana.merchantCheckout(orderParams);
+                        console.log('Transaction Result');
+                        console.log(txres);
+                    }
+                    /*console.log(JSON.stringify(response.payments[0]));
                     let returnUrl = window.location.protocol + '//' + window.location.host + '/checkout/thank-you?order=' + response.code;
-                    window.location = response.payments[0].metadata.public.checkoutUrl + '&return_url=' + encodeURIComponent(returnUrl);
+                    window.location = response.payments[0].metadata.public.checkoutUrl + '&return_url=' + encodeURIComponent(returnUrl);*/
                 } 
             }
 
@@ -211,7 +248,10 @@ export default {
             cartGetters,
             processOrder,
             updatePaymentMethod,
-            paymentMethod
+            paymentMethod,
+            walletConnected,
+            walletIcon,
+            walletProcessing
         };
     }
 };
