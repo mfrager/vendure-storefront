@@ -26,7 +26,7 @@
     "types": [
       "@types/node",
       "@nuxt/types",
-      "nuxt-i18n"
+      "@nuxtjs/i18n"
     ],
     "resolveJsonModule": true,
     "rootDir": "./",

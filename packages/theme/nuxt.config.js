@@ -137,7 +137,14 @@ export default {
       ]
     },
     transpile: [
-      'vee-validate/dist/rules'
+      'vee-validate/dist/rules',
+      '@solana/buffer-layout-utils',
+      '@solana/spl-token',
+      '@solana/wallet-adapter-base',
+      '@solana/wallet-adapter-solflare',
+      '@solana/wallet-adapter-phantom',
+      '@solana/wallet-adapter-glow',
+      '@glidejs/glide',
     ],
     plugins: [
       new webpack.DefinePlugin({
@@ -147,7 +154,14 @@ export default {
           lastCommit: process.env.LAST_COMMIT || ''
         })
       })
-    ]
+    ],
+    extend(config) {
+        config.module.rules.push({
+            test: /\.mjs$/,
+            include: /node_modules/,
+            type: "javascript/auto"
+        })
+    }
   },
   pwa: {
     meta: {

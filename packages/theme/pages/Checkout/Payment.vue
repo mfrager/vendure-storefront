@@ -110,8 +110,10 @@ import {
     SfLink
 } from '@storefront-ui/vue';
 import { onSSR } from '@vue-storefront/core';
-import { ref, computed } from '@vue/composition-api';
+import { ref, computed, onMounted } from '@vue/composition-api';
 import { useMakeOrder, useCart, cartGetters, usePayment } from '@vue-storefront/vendure';
+import $solana from '@/atellix/solana-client';
+import Emitter from 'tiny-emitter';
 
 export default {
     name: 'ReviewOrder',
@@ -136,6 +138,7 @@ export default {
 
         const terms = ref(false);
         const paymentMethod = ref(null);
+        const eventbus = new Emitter();
 
         onSSR(async () => {
             await load();
@@ -144,6 +147,40 @@ export default {
         const updatePaymentMethod = method => {
             paymentMethod.value = method;
         };
+
+        onMounted(async () => {
+            $solana.init();
+            var wallets = $solana.getWallets();
+            console.log('Wallets', wallets);
+            var wallet_adapter;
+            var wallet_await = new Promise((resolve) => {
+                eventbus.on('WalletConnected', function (val) {
+                    resolve(val);
+                });
+            });
+            if (wallets.length > 0) {
+                wallet_adapter = wallets[0];
+                wallet_adapter.on('connect', function (publicKey) {
+                    console.log('Connected to ' + publicKey.toBase58());
+                    eventbus.emit('WalletConnected', {
+                        'connected': true,
+                        'icon': wallet_adapter.icon,
+                        'pubkey': publicKey.toBase58(),
+                    });
+                });
+                wallet_adapter.on('disconnect', function () {
+                    console.log('Disconnected');
+                    eventbus.emit('WalletConnected', {'connected': false});
+                });
+                await wallet_adapter.connect();
+                await wallet_adapter.connect(); // Need to call twice on iOS?
+            }
+            var ready = await wallet_await;
+            if (ready) {
+                console.log('Solana ready!');
+                //thiz.provider = $solana.getProvider(thiz.wallet_adapter);
+            }
+        });
 
         const processOrder = async () => {
             const response = await set({
