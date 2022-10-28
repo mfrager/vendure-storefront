@@ -23,7 +23,9 @@ export default {
     ]
   },
   loading: { color: '#fff' },
-  plugins: [],
+  plugins: [
+    { src: '~/plugins/vue-native-websocket.js', mode: 'client' },
+  ],
   buildModules: [
     // to core
     '@nuxt/typescript-build',

@@ -63,8 +63,19 @@
                     class="sf-property--full-width sf-property--large summary__property-total"
                 />
 
-                <VsfPaymentProvider @paymentMethodSelected="updatePaymentMethod" :walletConnected="walletConnected" :walletIcon="walletIcon" :walletProcessing="walletProcessing"/>
-
+                <VsfPaymentProvider
+                    @paymentMethodSelected="updatePaymentMethod"
+                    @tokenSelected="updateTokenSelected"
+                    :walletConnected="walletConnected"
+                    :walletIcon="walletIcon"
+                    :walletProcessing="walletProcessing"
+                    :walletPubkey="walletPubkey"
+                    :tokenData="tokenData"
+                    :tokenList="tokenList"
+                    :tokenPrice="tokenPrice"
+                    :tokenStablecoin="tokenStablecoin"
+                />
+                
                 <SfCheckbox v-e2e="'terms'" v-model="terms" name="terms" class="summary__terms">
                     <template #label>
                         <div class="sf-checkbox__label">
@@ -113,8 +124,10 @@ import { onSSR } from '@vue-storefront/core';
 import { ref, computed, onMounted } from '@vue/composition-api';
 import { useMakeOrder, useCart, cartGetters, usePayment } from '@vue-storefront/vendure';
 import $solana from '@/atellix/solana-client';
+import socketStore from '@/atellix/socket-store'
 import Emitter from 'tiny-emitter';
 import axios from 'axios';
+import Vue from 'vue';
 
 export default {
     name: 'ReviewOrder',
@@ -144,6 +157,13 @@ export default {
         const walletProcessing = ref(false);
         const walletIcon = ref(false);
         const walletPubkey = ref(false);
+        const tokenSelected = ref('');
+        const tokenList = ref([]);
+        const tokenData = ref({});
+        const tokenBalance = ref([]);
+        const tokenStablecoin = ref(true);
+        const tokenPrice = ref(0);
+        const tokenOrderTotal = ref(0);
 
         onSSR(async () => {
             await load();
@@ -152,11 +172,81 @@ export default {
         const updatePaymentMethod = method => {
             paymentMethod.value = method;
         };
+        const updateTokenSelected = token => {
+            tokenSelected.value = token;
+            if (tokenData.value[token]) {
+                if (tokenData.value[token].stablecoin) {
+                    tokenStablecoin.value = true;
+                } else {
+                    tokenStablecoin.value = false;
+                }
+            }
+        };
+
+        const urlPayment = 'https://atx2.atellix.net/api/payment_gateway/v1/order';
+        const urlCheckout = 'https://atx2.atellix.net/api/checkout';
+        const urlWebsocket = 'wss://atx2.atellix.net/ws';
+        var trackOracle = {};
 
         onMounted(async () => {
+            axios.post(urlCheckout, {
+                'command': 'get_tokens',
+            }).then((resCheckout) => {
+                if (resCheckout.status === 200 && resCheckout.data.result === 'ok') {
+                    var tokens = resCheckout.data['tokens'];
+                    var swapData = resCheckout.data['swap_data'];
+                    tokenData.value = tokens;
+                    var tokenKeys = [ ...Object.keys(tokens) ];
+                    tokenKeys = tokenKeys.sort((a, b) => tokens[a].label.localeCompare(tokens[b].label));
+                    var tkList = [];
+                    var trackList = []
+                    for (var item of tokenKeys) {
+                        tokens[item]['id'] = item;
+                        tkList.push(tokens[item]);
+                    }
+                    tokenList.value = tkList;
+                    socketStore.registerModule('events', {});
+                    socketStore.subscribe((mutation, state) => {
+                        if (mutation.type === 'SOCKET_ONOPEN') {
+                            //console.log('Atellix websocket subscribe');
+                            for (var k in swapData) {
+                                const swp = swapData[k];
+                                if (swp.oracleTrack && !trackOracle[swp.oracleTrack]) {
+                                    trackOracle[swp.oracleTrack] = k.substring(5);
+                                    console.log('Track oracle: ' + swp.oracleTrack);
+                                    socketStore.dispatch('send_object', { 'command': 'subscribe', 'data': { 'channel': 'event/oracle/' + swp.oracleTrack }});
+                                }
+                            }
+                        } else if (mutation.type === 'SOCKET_ONCLOSE') {
+                            console.log('Atellix websocket closed');
+                        } else if (mutation.type === 'SOCKET_ONERROR') {
+                            console.log('Atellix websocket error');
+                            console.log(mutation.payload)
+                        } else if (mutation.type === 'SOCKET_ONMESSAGE') {
+                            const msg = state.socket.message;
+                            if (msg['event'] === 'channel_msg') {
+                                console.log('Channel: ' + msg['channel'] + ' - ' + JSON.stringify(msg['data']));
+                                if (msg['channel'].startsWith('event/sig/')) {
+                                    //thiz.eventbus.emit('TransactionResult', msg['data'])
+                                } else if (msg['channel'].startsWith('event/oracle/')) {
+                                    let oracle = msg['channel'].split('/')[2];
+                                    $solana.oracleQuote[oracle] = msg['data']['quote'];
+                                    console.log('Oracle quote: ' + oracle + ': ' + $solana.oracleQuote[oracle] + ' - ' + tokenSelected.value);
+                                    if (trackOracle[oracle] === tokenSelected.value) {
+                                        tokenPrice.value = $solana.oracleQuote[oracle];
+                                        console.log('New price');
+                                    }
+                                }
+                            }
+                        }
+                    });
+                    //console.log('Atellix websocket connect');
+                    Vue.prototype.$connect(urlWebsocket);
+                }
+            });
             $solana.init();
             var wallets = $solana.getWallets();
-            console.log('Wallets', wallets);
+            //console.log('Wallets', wallets);
             var walletAdapter;
             var walletAwait = new Promise((resolve) => {
                 eventbus.on('WalletConnected', function (val) {
@@ -199,7 +289,6 @@ export default {
             console.log('Process order');
             //console.log(cart);
             var amount = cart.value.totalWithTax / 100;
-            var urlPayment = 'https://atx2.atellix.net/api/payment_gateway/v1/order';
             var resPayment = await axios.post(urlPayment, {
                 'order_id': cart.value.code,
                 'price_total': amount.toFixed(2),
@@ -208,7 +297,6 @@ export default {
             });
             if (resPayment.status === 200 && resPayment.data.result === 'ok') {
                 var paydata = resPayment.data;
-                var urlCheckout = 'https://atx2.atellix.net/api/checkout';
                 var resCheckout = await axios.post(urlCheckout, {
                     'command': 'load',
                     'mode': 'order',
@@ -273,11 +361,19 @@ export default {
             tableHeaders: ['Description', 'Quantity', 'Amount'],
             cartGetters,
             processOrder,
+            updateTokenSelected,
             updatePaymentMethod,
             paymentMethod,
             walletConnected,
             walletIcon,
-            walletProcessing
+            walletProcessing,
+            walletPubkey,
+            tokenSelected,
+            tokenData,
+            tokenList,
+            tokenStablecoin,
+            tokenPrice,
+            tokenOrderTotal
         };
     }
 };

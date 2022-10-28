@@ -9,9 +9,9 @@
             <div class="form__radio-group payment__methods">
                 <div v-for="method in paymentMethods" :key="method.id">
                     <template v-if="method.code == 'atellixpay'">
-                        <table style="border: 0px; padding: 0px; margin: 0px;"> 
+                        <table style="border: 0px; padding: 0px; margin: 0px; width: 100%;"> 
                             <tr style="padding: 0px; margin: 0px;"> 
-                                <td style="border: 0px; padding: 0px; margin: 0px;"> 
+                                <td style="border: 0px; padding: 0px; margin: 0px; vertical-align: top;" rowspan="3">
                                     <SfRadio
                                         v-e2e="'payment-method'"
                                         :label="method.name"
@@ -35,14 +35,51 @@
                                         </template>
                                     </SfRadio>
                                 </td>
-                                <td style="border: 0px; padding: 0px; margin: 0px;"> 
-                                    <div style="height: 27px;">
-                                        <AtellixPayStatus
-                                            :walletConnected="walletConnected"
-                                            :walletIcon="walletIcon"
-                                            :walletProcessing="walletProcessing"
-                                        />
-                                    </div>
+                                <td style="border: 0px; padding: 0px; margin: 0px; padding-top: 8px; padding-left: 10px; height: 40px;" colspan="2"> 
+                                    <AtellixPayStatus
+                                        :walletConnected="walletConnected"
+                                        :walletIcon="walletIcon"
+                                        :walletProcessing="walletProcessing"
+                                        :walletPubkey="walletPubkey"
+                                    />
+                                </td>
+                            </tr>
+                            <tr style="padding: 0px; margin: 0px; height: 40px;"> 
+                                <td style="border: 0px; padding: 0px; margin: 0px; padding-left: 10px;"> 
+                                    Select Token: 
+                                </td>
+                                <td style="border: 0px; padding: 0px; margin: 0px; padding-left: 10px;"> 
+                                    <AtellixPayTokens
+                                        :walletConnected="walletConnected"
+                                        :tokenList="tokenList"
+                                        @input="selectToken"
+                                    />
+                                </td>
+                            </tr>
+                            <tr style="padding: 0px; margin: 0px; height: 40px;"> 
+                                <td style="border: 0px; padding: 0px; margin: 0px; padding-left: 10px;"> 
+                                    Token Balance:
+                                </td>
+                                <td style="border: 0px; padding: 0px; margin: 0px; padding-left: 10px;"> 
+                                    <AtellixPayBalance
+                                        :walletConnected="walletConnected"
+                                        :walletPubkey="walletPubkey"
+                                        :currentToken="selectedToken"
+                                        :tokenData="tokenData"
+                                    />
+                                </td>
+                            </tr>
+                            <tr v-if="!tokenStablecoin" style="padding: 0px; margin: 0px; height: 40px;"> 
+                                <td style="border: 0px; padding: 0px; margin: 0px;">&nbsp;</td>
+                                <td style="border: 0px; padding: 0px; margin: 0px; padding-left: 10px;"> 
+                                    Token Price:
+                                </td>
+                                <td style="border: 0px; padding: 0px; margin: 0px; padding-left: 10px;"> 
+                                    <AtellixPayTokenPrice
+                                        :currentToken="selectedToken"
+                                        :tokenPrice="tokenPrice"
+                                        :tokenData="tokenData"
+                                    />
                                 </td>
                             </tr>
                         </table>
@@ -89,15 +126,19 @@ import { usePayment } from '@vue-storefront/vendure';
 
 export default {
     name: 'VsfPaymentProvider',
-    props: ['walletConnected', 'walletIcon', 'walletProcessing'],
+    props: ['walletConnected', 'walletIcon', 'walletProcessing', 'walletPubkey', 'tokenList', 'tokenData', 'tokenStablecoin', 'tokenPrice'],
     components: {
         SfHeading,
         SfButton,
         SfRadio,
-        AtellixPayStatus: () => import('~/components/Checkout/AtellixPayStatus')
+        AtellixPayStatus: () => import('~/components/Checkout/AtellixPayStatus'),
+        AtellixPayTokens: () => import('~/components/Checkout/AtellixPayTokens'),
+        AtellixPayBalance: () => import('~/components/Checkout/AtellixPayBalance'),
+        AtellixPayTokenPrice: () => import('~/components/Checkout/AtellixPayTokenPrice')
     },
     setup (props, { emit }) {
         const { status } = usePaymentProviderMock();
+        const selectedToken = ref('');
         const selectedPaymentMethod = ref({});
         const paymentMethods = ref([]);
         const { methods, load } = usePayment();
@@ -106,6 +147,11 @@ export default {
             selectedPaymentMethod.value = paymentMethod;
             emit('paymentMethodSelected', paymentMethod);
             status.value = true;
+        };
+
+        const selectToken = async (token) => {
+            selectedToken.value = token;
+            emit('tokenSelected', token);
         };
 
         onMounted(async () => {
@@ -117,7 +163,9 @@ export default {
         return {
             paymentMethods,
             selectedPaymentMethod,
-            selectPaymentMethod
+            selectedToken,
+            selectPaymentMethod,
+            selectToken
         };
     }
 };
