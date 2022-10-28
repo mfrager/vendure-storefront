@@ -58,8 +58,14 @@
                 <SfDivider />
 
                 <SfProperty
-                    :name="$t('Total price')"
-                    :value="$n(totals.subtotal, 'currency')"
+                    :name="$t('Total price with shipping')"
+                    :value="$n(totals.total, 'currency')"
+                    class="sf-property--full-width sf-property--large summary__property-total"
+                />
+
+                <SfProperty v-if="!tokenStablecoin"
+                    :name="$t('Price in tokens')"
+                    :value="tokenOrderTotal"
                     class="sf-property--full-width sf-property--large summary__property-total"
                 />
 
@@ -72,8 +78,9 @@
                     :walletPubkey="walletPubkey"
                     :tokenData="tokenData"
                     :tokenList="tokenList"
-                    :tokenPrice="tokenPrice"
                     :tokenStablecoin="tokenStablecoin"
+                    :tokenPrice="tokenPrice"
+                    :orderTokens="tokenOrderTotal"
                 />
                 
                 <SfCheckbox v-e2e="'terms'" v-model="terms" name="terms" class="summary__terms">
@@ -160,15 +167,17 @@ export default {
         const tokenSelected = ref('');
         const tokenList = ref([]);
         const tokenData = ref({});
+        const tokenSwapData = ref({});
         const tokenBalance = ref([]);
         const tokenStablecoin = ref(true);
-        const tokenPrice = ref(0);
+        const tokenPrice = ref('');
         const tokenOrderTotal = ref(0);
 
         onSSR(async () => {
             await load();
         });
 
+        const baseToken = 'USDV';
         const updatePaymentMethod = method => {
             paymentMethod.value = method;
         };
@@ -181,7 +190,31 @@ export default {
                     tokenStablecoin.value = false;
                 }
             }
+            if (tokenSwapData.value[baseToken + '-' + token]) {
+                if (tokenSwapData.value[baseToken + '-' + token].oracleTrack) {
+                    const oracle = tokenSwapData.value[baseToken + '-' + token].oracleTrack;
+                    if ($solana.oracleQuote[oracle]) {
+                        eventbus.emit('TokenPrice', $solana.oracleQuote[oracle]);
+                    }
+                }
+            }
         };
+
+        eventbus.on('TokenPrice', async (val) => {
+            tokenPrice.value = val;
+            const fromToken = tokenData.value[tokenSelected.value];
+            const toToken = tokenData.value[baseToken];
+            const swapKey = baseToken + '-' + tokenSelected.value;
+            const spec = await $solana.quoteAmount(toToken, fromToken, tokenSwapData.value[swapKey], val, swapKey, 'buy');
+            tokenOrderTotal.value = spec.viewAmount;
+        });
+        eventbus.on('TransactionResult', async (val) => {
+            if (val['status'] === 'complete') {
+                const thankYouPath = { name: 'thank-you', query: { order: cart.value.code }};
+                context.root.$router.push(context.root.localePath(thankYouPath));
+                setCart(null);
+            }
+        });
 
         const urlPayment = 'https://atx2.atellix.net/api/payment_gateway/v1/order';
         const urlCheckout = 'https://atx2.atellix.net/api/checkout';
@@ -196,6 +229,7 @@ export default {
                     var tokens = resCheckout.data['tokens'];
                     var swapData = resCheckout.data['swap_data'];
                     tokenData.value = tokens;
+                    tokenSwapData.value = swapData;
                     var tokenKeys = [ ...Object.keys(tokens) ];
                     tokenKeys = tokenKeys.sort((a, b) => tokens[a].label.localeCompare(tokens[b].label));
                     var tkList = [];
@@ -225,16 +259,15 @@ export default {
                         } else if (mutation.type === 'SOCKET_ONMESSAGE') {
                             const msg = state.socket.message;
                             if (msg['event'] === 'channel_msg') {
-                                console.log('Channel: ' + msg['channel'] + ' - ' + JSON.stringify(msg['data']));
+                                //console.log('Channel: ' + msg['channel'] + ' - ' + JSON.stringify(msg['data']));
                                 if (msg['channel'].startsWith('event/sig/')) {
-                                    //thiz.eventbus.emit('TransactionResult', msg['data'])
+                                    eventbus.emit('TransactionResult', msg['data'])
                                 } else if (msg['channel'].startsWith('event/oracle/')) {
                                     let oracle = msg['channel'].split('/')[2];
                                     $solana.oracleQuote[oracle] = msg['data']['quote'];
                                     console.log('Oracle quote: ' + oracle + ': ' + $solana.oracleQuote[oracle] + ' - ' + tokenSelected.value);
                                     if (trackOracle[oracle] === tokenSelected.value) {
-                                        tokenPrice.value = $solana.oracleQuote[oracle];
-                                        console.log('New price');
+                                        eventbus.emit('TokenPrice', $solana.oracleQuote[oracle]);
                                     }
                                 }
                             }
@@ -242,47 +275,52 @@ export default {
                     });
                     //console.log('Atellix websocket connect');
                     Vue.prototype.$connect(urlWebsocket);
+                    $solana.init();
+                    var wallets = $solana.getWallets();
+                    //console.log('Wallets', wallets);
+                    var walletAdapter;
+                    var walletAwait = new Promise((resolve) => {
+                        eventbus.on('WalletConnected', function (val) {
+                            resolve(val);
+                        });
+                    });
+                    if (wallets.length > 0) {
+                        walletAdapter = wallets[0];
+                        walletAdapter.on('connect', function (publicKey) {
+                            console.log('Connected to ' + publicKey.toBase58());
+                            var walletStatus = {
+                                'connnected': true,
+                                'icon': walletAdapter.icon,
+                                'pubkey': publicKey.toBase58(),
+                            };
+                            walletIcon.value = walletAdapter.icon;
+                            walletConnected.value = true;
+                            walletPubkey.value = publicKey.toBase58();
+                            eventbus.emit('WalletConnected', true);
+                        });
+                        walletAdapter.on('disconnect', function () {
+                            console.log('Disconnected');
+                            var walletStatus = {
+                                'connnected': false,
+                            };
+                            walletConnected.value = false;
+                            eventbus.emit('WalletConnected', false);
+                        });
+                        (async function (x) {
+                            await walletAdapter.connect();
+                            await walletAdapter.connect(); // Need to call twice on iOS?
+                        })();
+                    }
+                    (async function (x) {
+                        var ready = await walletAwait;
+                        if (ready) {
+                            console.log('Solana ready!');
+                            $solana.getProvider(walletAdapter);
+                            $solana.updateNetData(resCheckout.data['net_data']);
+                        }
+                    })();
                 }
             });
-            $solana.init();
-            var wallets = $solana.getWallets();
-            //console.log('Wallets', wallets);
-            var walletAdapter;
-            var walletAwait = new Promise((resolve) => {
-                eventbus.on('WalletConnected', function (val) {
-                    resolve(val);
-                });
-            });
-            if (wallets.length > 0) {
-                walletAdapter = wallets[0];
-                walletAdapter.on('connect', function (publicKey) {
-                    console.log('Connected to ' + publicKey.toBase58());
-                    var walletStatus = {
-                        'connnected': true,
-                        'icon': walletAdapter.icon,
-                        'pubkey': publicKey.toBase58(),
-                    };
-                    walletIcon.value = walletAdapter.icon;
-                    walletConnected.value = true;
-                    walletPubkey.value = publicKey.toBase58();
-                    eventbus.emit('WalletConnected', true);
-                });
-                walletAdapter.on('disconnect', function () {
-                    console.log('Disconnected');
-                    var walletStatus = {
-                        'connnected': false,
-                    };
-                    walletConnected.value = false;
-                    eventbus.emit('WalletConnected', false);
-                });
-                await walletAdapter.connect();
-                await walletAdapter.connect(); // Need to call twice on iOS?
-            }
-            var ready = await walletAwait;
-            if (ready) {
-                console.log('Solana ready!');
-                $solana.getProvider(walletAdapter);
-            }
         });
 
         const processOrder = async () => {
@@ -303,13 +341,13 @@ export default {
                     'uuid': paydata['order_uuid'],
                 });
                 if (resCheckout.status === 200 && resCheckout.data.result === 'ok') {
-                    var data = resCheckout.data;
+                    const data = resCheckout.data;
                     $solana.updateNetData(data['net_data']);
                     $solana.updateSwapData(data['swap_data']);
                     $solana.updateOrderData(data['order_data']);
                     $solana.updateRegister(async (sig) => {
                         console.log('Register Signature: ' + sig);
-                        var resRegister = await axios.post(urlCheckout, {
+                        const resRegister = await axios.post(urlCheckout, {
                             'command': 'register_signature',
                             'op': 'checkout',
                             'sig': sig,
@@ -318,18 +356,28 @@ export default {
                             'user_key': walletPubkey.value,
                         });
                         if (resRegister.status === 200 && resRegister.data.result === 'ok') {
+                            socketStore.dispatch('send_object', { 'command': 'subscribe', 'data': { 'channel': 'event/sig/' + sig }});
                             return true;
                         }
                         return false;
                     });
-                    var amountTotal = cart.value.totalWithTax * 100;
-                    var tokensTotal = amountTotal.toFixed(0);
-                    var orderParams = {
-                        'tokensTotal': tokensTotal,
-                        'swap': true,
-                        'swapKey': 'USDV-USDC',
-                    };
-                    var txres = await $solana.merchantCheckout(orderParams);
+                    const amountTotal = cart.value.totalWithTax * 100;
+                    const tokensTotal = amountTotal.toFixed(0);
+                    const swapKey = baseToken + '-' + tokenSelected.value;
+                    var orderParams;
+                    if (tokenSelected.value === baseToken) {
+                        orderParams = {
+                            'tokensTotal': tokensTotal,
+                            'swap': false,
+                        };
+                    } else {
+                        orderParams = {
+                            'tokensTotal': tokensTotal,
+                            'swap': true,
+                            'swapKey': swapKey,
+                        };
+                    }
+                    const txres = await $solana.merchantCheckout(orderParams);
                     console.log('Transaction Result');
                     console.log(txres);
                 }

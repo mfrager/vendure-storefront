@@ -86,6 +86,9 @@ export default {
             this.program = {}
         }
         if (typeof this.program[name] === 'undefined') {
+            console.log('Load program')
+            console.log(this.netData.program, pkey)
+            console.log(this.netData.program[pkey])
             let programPK = new PublicKey(this.netData.program[pkey])
             this.program[name] = new Program(ANCHOR_IDL[pkey], programPK)
             /*if (name === 'swapContract') {

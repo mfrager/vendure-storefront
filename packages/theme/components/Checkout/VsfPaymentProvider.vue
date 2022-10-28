@@ -75,13 +75,18 @@
                                     Token Price:
                                 </td>
                                 <td style="border: 0px; padding: 0px; margin: 0px; padding-left: 10px;"> 
-                                    <AtellixPayTokenPrice
-                                        :currentToken="selectedToken"
-                                        :tokenPrice="tokenPrice"
-                                        :tokenData="tokenData"
-                                    />
+                                    {{ tokenPrice }}
                                 </td>
                             </tr>
+                            <!--<tr v-if="!tokenStablecoin" style="padding: 0px; margin: 0px; height: 40px;"> 
+                                <td style="border: 0px; padding: 0px; margin: 0px;">&nbsp;</td>
+                                <td style="border: 0px; padding: 0px; margin: 0px; padding-left: 10px;"> 
+                                    Tokens For Order:
+                                </td>
+                                <td style="border: 0px; padding: 0px; margin: 0px; padding-left: 10px;"> 
+                                    {{ orderTokens }}
+                                </td>
+                            </tr>-->
                         </table>
                     </template>
                     <template v-else>
@@ -126,7 +131,7 @@ import { usePayment } from '@vue-storefront/vendure';
 
 export default {
     name: 'VsfPaymentProvider',
-    props: ['walletConnected', 'walletIcon', 'walletProcessing', 'walletPubkey', 'tokenList', 'tokenData', 'tokenStablecoin', 'tokenPrice'],
+    props: ['walletConnected', 'walletIcon', 'walletProcessing', 'walletPubkey', 'tokenList', 'tokenData', 'tokenStablecoin', 'tokenPrice', 'orderTokens'],
     components: {
         SfHeading,
         SfButton,
@@ -134,7 +139,6 @@ export default {
         AtellixPayStatus: () => import('~/components/Checkout/AtellixPayStatus'),
         AtellixPayTokens: () => import('~/components/Checkout/AtellixPayTokens'),
         AtellixPayBalance: () => import('~/components/Checkout/AtellixPayBalance'),
-        AtellixPayTokenPrice: () => import('~/components/Checkout/AtellixPayTokenPrice')
     },
     setup (props, { emit }) {
         const { status } = usePaymentProviderMock();
