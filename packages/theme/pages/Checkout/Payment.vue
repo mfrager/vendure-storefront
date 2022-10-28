@@ -164,6 +164,7 @@ export default {
         const walletProcessing = ref(false);
         const walletIcon = ref(false);
         const walletPubkey = ref(false);
+        const orderTotal = ref(0);
         const tokenSelected = ref('');
         const tokenList = ref([]);
         const tokenData = ref({});
@@ -199,13 +200,15 @@ export default {
                 }
             }
         };
+        const orderAmount = cart.value.totalWithTax / 100;
+        orderTotal.value = orderAmount.toFixed(2);
 
         eventbus.on('TokenPrice', async (val) => {
             tokenPrice.value = val;
             const fromToken = tokenData.value[tokenSelected.value];
             const toToken = tokenData.value[baseToken];
             const swapKey = baseToken + '-' + tokenSelected.value;
-            const spec = await $solana.quoteAmount(toToken, fromToken, tokenSwapData.value[swapKey], val, swapKey, 'buy');
+            const spec = await $solana.quoteAmount(toToken, fromToken, tokenSwapData.value[swapKey], orderTotal.value, swapKey, 'buy');
             tokenOrderTotal.value = spec.viewAmount;
         });
         eventbus.on('TransactionResult', async (val) => {
@@ -265,7 +268,7 @@ export default {
                                 } else if (msg['channel'].startsWith('event/oracle/')) {
                                     let oracle = msg['channel'].split('/')[2];
                                     $solana.oracleQuote[oracle] = msg['data']['quote'];
-                                    console.log('Oracle quote: ' + oracle + ': ' + $solana.oracleQuote[oracle] + ' - ' + tokenSelected.value);
+                                    console.log('Oracle quote: ' + oracle + ': ' + $solana.oracleQuote[oracle]);
                                     if (trackOracle[oracle] === tokenSelected.value) {
                                         eventbus.emit('TokenPrice', $solana.oracleQuote[oracle]);
                                     }
@@ -377,28 +380,15 @@ export default {
                             'swapKey': swapKey,
                         };
                     }
+                    walletProcessing.value = true;
                     const txres = await $solana.merchantCheckout(orderParams);
                     console.log('Transaction Result');
                     console.log(txres);
+                    if (txres.result === 'error') {
+                        walletProcessing.value = false;
+                    }
                 }
             }
-            
-            /*const response = await set({
-                method: paymentMethod?.value?.code,
-                metadata: {
-                }
-            });
-            if (paymentMethod.value.code === 'atellixpay') {
-                if (response.payments && response.payments[0].transactionId) {
-                    console.log(JSON.stringify(response.payments[0]));
-                    let returnUrl = window.location.protocol + '//' + window.location.host + '/checkout/thank-you?order=' + response.code;
-                    window.location = response.payments[0].metadata.public.checkoutUrl + '&return_url=' + encodeURIComponent(returnUrl);
-                } 
-            }*/
-
-            /*const thankYouPath = { name: 'thank-you', query: { order: response?.code }};
-            context.root.$router.push(context.root.localePath(thankYouPath));
-            setCart(null);*/
         };
 
         return {
